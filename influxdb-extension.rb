@@ -27,10 +27,17 @@ module Sensu::Extension
         output = event[:check][:output]
 
         output.split(/\r\n|\n/).each do |line|
-            measurement, field_value, timestamp = line.split(/\s+/)
-            point = "#{measurement}#{tags} value=#{field_value} #{timestamp}" 
-            @buffer.push(point)
-            @logger.debug("#{@@extension_name}: stored point in buffer (#{@buffer.length}/#{@BUFFER_SIZE})")
+          measurement, field_value, timestamp = line.split(/\s+/)
+
+          if not is_number?(timestamp)
+            @logger.error("invalid timestamp, skipping line in event #{event}")
+            next
+          end
+          
+          point = "#{measurement}#{tags} value=#{field_value} #{timestamp}" 
+
+          @buffer.push(point)
+          @logger.debug("#{@@extension_name}: stored point in buffer (#{@buffer.length}/#{@BUFFER_SIZE})")
         end
       rescue => e
         @logger.error("#{@@extension_name}: unable to post payload to influxdb for event #{event} - #{e.backtrace.to_s}")
@@ -43,7 +50,7 @@ module Sensu::Extension
       influxdb_config = settings[@@extension_name]
       
       validate_config(influxdb_config)
-       
+      
       hostname         = influxdb_config[:hostname] 
       port             = influxdb_config[:port] || 8086
       database         = influxdb_config[:database]
@@ -67,30 +74,30 @@ module Sensu::Extension
     end
 
     def create_tags(tags)
-        begin
-            # sorting tags alphabetically in order to increase influxdb performance
-            sorted_tags = hash[tags.sort]
+      begin
+        # sorting tags alphabetically in order to increase influxdb performance
+        sorted_tags = hash[tags.sort]
 
-            tag_string = "" 
-            sorted_tags.each do |tag, value|
-                tag_string += ",#{tag}=#{value}"
-            end
-
-            @logger.debug("#{@@extension_name}: created tags: #{tag_string}")
-            tag_string
-        rescue => e
-            @logger.error("#{@@extension_name}: unable to create tag string from #{tags} - #{e.backtrace.to_s}")
-            ""
+        tag_string = "" 
+        sorted_tags.each do |tag, value|
+          tag_string += ",#{tag}=#{value}"
         end
+
+        @logger.debug("#{@@extension_name}: created tags: #{tag_string}")
+        tag_string
+      rescue => e
+        @logger.error("#{@@extension_name}: unable to create tag string from #{tags} - #{e.backtrace.to_s}")
+        ""
+      end
     end
 
     def send_to_influxdb(payload)
-        request = net::http::post.new(@uri.request_uri)
-        request.body = payload 
-        
-        @logger.debug("#{@@extension_name}: writing payload #{payload} to endpoint #{@uri.to_s}")
-        response = @http.request(request)
-        @logger.debug("#{@@extension_name}: influxdb http response code = #{response.code}, body = #{response.body}")
+      request = net::http::post.new(@uri.request_uri)
+      request.body = payload 
+      
+      @logger.debug("#{@@extension_name}: writing payload #{payload} to endpoint #{@uri.to_s}")
+      response = @http.request(request)
+      @logger.debug("#{@@extension_name}: influxdb http response code = #{response.code}, body = #{response.body}")
     end
 
     def flush_buffer
@@ -120,5 +127,8 @@ module Sensu::Extension
         end
       end
     end
+    def is_number?(input)
+      true if Integer(input) rescue false
+    end 
   end
 end
