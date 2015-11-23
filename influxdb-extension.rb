@@ -127,6 +127,7 @@ module Sensu::Extension
         end
       end
     end
+
     def is_number?(input)
       true if Integer(input) rescue false
     end 
