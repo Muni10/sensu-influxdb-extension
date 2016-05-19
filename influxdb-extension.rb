@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'net/http'
-require 'multi_json'
+require 'json'
 
 module Sensu::Extension
   class InfluxDB < Handler
@@ -21,19 +21,19 @@ module Sensu::Extension
       
       validate_config(influxdb_config)
        
-      hostname         = influxdb_config[:hostname] 
-      port             = influxdb_config[:port] || 8086
-      database         = influxdb_config[:database]
-      ssl              = influxdb_config[:ssl] || false
-      precision        = influxdb_config[:precision] || 's'
-      retention_policy = influxdb_config[:retention_policy]
+      hostname         = influxdb_config['hostname'] 
+      port             = influxdb_config['port'] || 8086
+      database         = influxdb_config['database']
+      ssl              = influxdb_config['ssl'] || false
+      precision        = influxdb_config['precision'] || 's'
+      retention_policy = influxdb_config['retention_policy']
       rp_queryparam    = if retention_policy.nil? then "" else "&rp=#{retention_policy}" end
       protocol         = if ssl then 'https' else 'http' end 
-      username         = influxdb_config[:username]
-      password         = influxdb_config[:password]
+      username         = influxdb_config['username']
+      password         = influxdb_config['password']
       auth_queryparam  = if username.nil? or password.nil? then "" else "&u=#{username}&p=#{password}" end
-      @BUFFER_SIZE     = influxdb_config[:buffer_size] || 100
-      @BUFFER_MAX_AGE  = influxdb_config[:buffer_max_age] || 10
+      @BUFFER_SIZE     = influxdb_config['buffer_size'] || 100
+      @BUFFER_MAX_AGE  = influxdb_config['buffer_max_age'] || 10
 
       @uri = URI("#{protocol}://#{hostname}:#{port}/write?db=#{database}&precision=#{precision}#{rp_queryparam}#{auth_queryparam}")
       @http = Net::HTTP::new(@uri.host, @uri.port)         
@@ -49,12 +49,20 @@ module Sensu::Extension
           flush_buffer
         end
         
-        event = MultiJson.load(event)
-        tags = create_tags(event[:client][:tags])       
-        output = event[:check][:output]
+        event = JSON.parse(event)
+        client_tags = event['client']['tags'] || Hash.new
+        check_tags = event['check']['tags'] || Hash.new
+        tags = create_tags(client_tags.merge(check_tags))
+        output = event['check']['output']
 
         output.split(/\r\n|\n/).each do |line|
             measurement, field_value, timestamp = line.split(/\s+/)
+
+            if not is_number?(timestamp)
+              @logger.error("invalid timestamp, skipping line in event #{event}")
+              next
+            end
+            
             point = "#{measurement}#{tags} value=#{field_value} #{timestamp}" 
             @buffer.push(point)
             @logger.debug("#{@@extension_name}: stored point in buffer (#{@buffer.length}/#{@BUFFER_SIZE})")
@@ -73,7 +81,9 @@ module Sensu::Extension
             sorted_tags = Hash[tags.sort]
 
             tag_string = "" 
+
             sorted_tags.each do |tag, value|
+                next if value.to_s.empty? # skips tags without values
                 tag_string += ",#{tag}=#{value}"
             end
 
@@ -121,5 +131,9 @@ module Sensu::Extension
         end
       end
     end
+
+    def is_number?(input)
+      true if Integer(input) rescue false
+    end 
   end
 end
